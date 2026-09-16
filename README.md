@@ -69,9 +69,10 @@ to answer rather than letting the LLM improvise from its training data.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `LLM_PROVIDER` | `openai` | `openai` or `openrouter` |
+| `LLM_PROVIDER` | `openai` | `openai`, `openrouter`, or `zai` |
 | `OPENAI_API_KEY` | — | **Required when `LLM_PROVIDER=openai`.** Cloud LLM key (the only internet dependency) |
 | `OPENROUTER_API_KEY` | — | **Required when `LLM_PROVIDER=openrouter`.** Key from openrouter.ai/keys; then set `LLM_MODEL` to the prefixed name, e.g. `anthropic/claude-sonnet-4` |
+| `ZAI_API_KEY` | — | **Required when `LLM_PROVIDER=zai`.** GLM Coding Plan key; base URL is set automatically to the coding endpoint. `LLM_MODEL` e.g. `glm-4.7` / `glm-5.3` |
 | `LLM_BASE_URL` / `LLM_API_KEY` | empty | Any other OpenAI-compatible endpoint (Groq, vLLM, Ollama, …) |
 | `LLM_MODEL` | `gpt-4o-mini` | Generation model name |
 | `RAG_PORT` / `QDRANT_PORT` | 8000 / 6333 | Host ports for API and Qdrant dashboard |

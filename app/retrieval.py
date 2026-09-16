@@ -99,6 +99,13 @@ def answer_question(question: str, hits: list[dict]):
         # optional attribution headers, appreciated by OpenRouter
         default_headers = {"HTTP-Referer": "https://github.com/smarterworkerai/docling-rag-poc",
                            "X-Title": "docling-rag-poc"}
+    elif provider == "zai":
+        # z.ai coding plan: OpenAI-compatible, endpoint is plan-scoped
+        api_key = os.getenv("ZAI_API_KEY") or os.getenv("LLM_API_KEY")
+        if not api_key:
+            return None, False, "no LLM API key set (ZAI_API_KEY); retrieval-only mode"
+        base_url = settings.llm_base_url or "https://api.z.ai/api/coding/paas/v4"
+        default_headers = {"Accept-Language": "en-US,en"}
     else:
         api_key = os.getenv("OPENAI_API_KEY") or os.getenv("LLM_API_KEY")
         if not api_key:
