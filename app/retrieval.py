@@ -41,12 +41,12 @@ def get_reranker():
     if "qwen3-reranker" in model_name.lower():
         from transformers import AutoModelForCausalLM
 
-        model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=dtype)
+        model = AutoModelForCausalLM.from_pretrained(model_name, dtype=dtype)
         kind = "qwen3"
     else:
         from transformers import AutoModelForSequenceClassification
 
-        model = AutoModelForSequenceClassification.from_pretrained(model_name, torch_dtype=dtype)
+        model = AutoModelForSequenceClassification.from_pretrained(model_name, dtype=dtype)
         kind = "cross-encoder"
     model = model.to(device).eval()
     return tok, model, kind, device
