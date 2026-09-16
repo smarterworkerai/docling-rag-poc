@@ -16,6 +16,8 @@ services:
     build:
       context: .
     image: docling-rag-poc:local
+    # local-only image: never attempt a registry pull; always use the build
+    pull_policy: never
     restart: unless-stopped
     depends_on:
       qdrant:
