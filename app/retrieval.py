@@ -74,18 +74,26 @@ def _rerank(query: str, texts: list[str]) -> list[float]:
     if kind == "qwen3":
         prefix = "<|im_start|>system\nJudge whether the Document meets the requirements based on the query. " \
                  "Only answer Yes or No.<|im_end|>\n<|im_start|>user\n"
-        suffix = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
-        pairs = [
-            f"{prefix}Query: {query}\nDocument: {t}{suffix}" for t in texts
-        ]
-        with torch.no_grad():
-            inputs = tok(pairs, padding=True, truncation=True, max_length=2048,
-                         return_tensors="pt").to(device)
-            scores = model(**inputs).logits[:, -1, :]
-        yes = tok("Yes", add_special_tokens=False).input_ids[0]
-        no = tok("No", add_special_tokens=False).input_ids[0]
-        logits = scores[:, [yes, no]].float()
-        probs = torch.softmax(logits, dim=-1)[:, 0]
+        suffix = "<|im_end|>\n<|im_start|>assistant\n\n\n"
+        scores_all: list[float] = []
+        # batch: a [B, 2048] fp16 forward of a 0.6B causal LM costs ~GBs of
+        # activation memory; keep B small (VRAM is shared with the embedder
+        # and the docling layout model)
+        batch = 8
+        for i in range(0, len(texts), batch):
+            part = [
+                f"{prefix}Query: {query}\nDocument: {t}{suffix}" for t in texts[i:i + batch]
+            ]
+            with torch.no_grad():
+                inputs = tok(part, padding=True, truncation=True, max_length=2048,
+                             return_tensors="pt").to(device)
+                out = model(**inputs).logits[:, -1, :]
+            yes = tok("Yes", add_special_tokens=False).input_ids[0]
+            no = tok("No", add_special_tokens=False).input_ids[0]
+            logits = out[:, [yes, no]].float()
+            probs = torch.softmax(logits, dim=-1)[:, 0]
+            scores_all.extend(probs.tolist())
+        return scores_all
     else:
         pairs = [[query, t] for t in texts]
         with torch.no_grad():
