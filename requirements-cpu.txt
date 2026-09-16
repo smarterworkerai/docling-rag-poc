@@ -1,5 +1,5 @@
 # CPU-only pins: identical app deps, plain torch (no CUDA wheels).
-docling==2.39.0
+docling==2.128.0
 FlagEmbedding==1.3.5
 qdrant-client==1.15.1
 fastapi==0.116.1

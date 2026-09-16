@@ -13,18 +13,21 @@ def parse_document(path: str) -> str:
     """Docling: PDF/DOCX/... -> markdown with layout awareness."""
     from docling.document_converter import DocumentConverter, PdfFormatOption
     from docling.datamodel.base_models import InputFormat
-    from docling.datamodel.pipeline_options import PdfPipelineOptions
+    from docling.datamodel.pipeline_options import ThreadedPdfPipelineOptions
 
-    pipeline_options = PdfPipelineOptions()
+    pipeline_options = ThreadedPdfPipelineOptions()
     # A4000 Mobile tuning: defaults are 4; raise to fill free VRAM (~5 GB spare
-    # after the embedding/rerank models take ~2.5 GB).
+    # after the embedding/rerank models take ~2.5 GB). Requires docling>=2.4x
+    # (ThreadedPdfPipelineOptions); these fields sit on PdfPipelineOptions and
+    # are inherited here.
     pipeline_options.layout_batch_size = settings.docling_layout_batch_size
     pipeline_options.ocr_batch_size = settings.docling_ocr_batch_size
-    if settings.docling_table_batch_size:
-        pipeline_options.table_batch_size = settings.docling_table_batch_size
+    pipeline_options.table_batch_size = settings.docling_table_batch_size
     device = settings.docling_device
     if device and device != "auto":
-        pipeline_options.accelerator_options.device = device
+        from docling.datamodel.pipeline_options import AcceleratorDevice
+
+        pipeline_options.accelerator_options.device = AcceleratorDevice(device)
 
     converter = DocumentConverter(
         format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
