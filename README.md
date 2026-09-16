@@ -108,7 +108,9 @@ to answer rather than letting the LLM improvise from its training data.
 
 - **OOM during ingestion** → lower `DOCLING_LAYOUT_BATCH_SIZE`/`DOCLING_OCR_BATCH_SIZE` (32 → 16 → 8).
 - **16 GB GPU** → swap `RERANK_MODEL=Qwen/Qwen3-Reranker-4B` for better ranking quality.
-- **CPU-only host** → set `DOCLING_DEVICE=cpu` and remove the `deploy.resources` GPU block from `docker-compose.yml`; expect ~10 pages/min parsing instead of ~1–2 pages/s.
+- **CPU-only host** → don't edit anything; use the CPU overlay instead (see
+  "Running on a weak CPU-only machine" below). Expect ~10 pages/min parsing
+  instead of ~1–2 pages/s.
 - **Ingestion speed**: a mixed 300-page PDF takes roughly 5–10 min on GPU with these batch sizes.
 
 ## Running on a weak CPU-only machine (after embedding on the GPU box)
