@@ -9,13 +9,38 @@ from retrieval import get_embedder
 log = logging.getLogger("docling-rag.ingest")
 
 
+def _ensure_docling_artifacts() -> "Path":
+    """docling>=2.1xx requires artifacts_path to already contain the models
+    (no auto-download). Download them on first use into the artifacts dir
+    (a mounted volume, so this happens once per host)."""
+    from pathlib import Path
+
+    from docling.datamodel.settings import settings as docling_settings
+
+    art = docling_settings.artifacts_path
+    if art is None:
+        art = Path(docling_settings.cache_dir) / "models"
+    art = Path(art)
+    art.mkdir(parents=True, exist_ok=True)
+    if any(art.iterdir()):
+        return art
+    log.info("docling artifacts empty at %s - downloading models (one-time)", art)
+    from docling.utils.model_downloader import download_models
+
+    download_models(output_dir=art, progress=True)
+    return art
+
+
 def parse_document(path: str) -> str:
     """Docling: PDF/DOCX/... -> markdown with layout awareness."""
     from docling.document_converter import DocumentConverter, PdfFormatOption
     from docling.datamodel.base_models import InputFormat
     from docling.datamodel.pipeline_options import ThreadedPdfPipelineOptions
 
+    artifacts_path = _ensure_docling_artifacts()
+
     pipeline_options = ThreadedPdfPipelineOptions()
+    pipeline_options.artifacts_path = artifacts_path
     # A4000 Mobile tuning: defaults are 4; raise to fill free VRAM (~5 GB spare
     # after the embedding/rerank models take ~2.5 GB). Requires docling>=2.4x
     # (ThreadedPdfPipelineOptions); these fields sit on PdfPipelineOptions and
