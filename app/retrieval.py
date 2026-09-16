@@ -37,7 +37,7 @@ def get_reranker():
     log.info("loading reranker %s", model_name)
     device = settings.device if settings.device != "auto" else ("cuda" if torch.cuda.is_available() else "cpu")
     dtype = torch.float16 if device.startswith("cuda") else torch.float32
-    tok = AutoTokenizer.from_pretrained(model_name, pad_token=None, trust_remote_code=False)
+    tok = AutoTokenizer.from_pretrained(model_name, trust_remote_code=False)
     if "qwen3-reranker" in model_name.lower():
         from transformers import AutoModelForCausalLM
 
