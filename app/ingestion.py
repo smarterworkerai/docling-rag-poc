@@ -50,8 +50,13 @@ def _artifacts_complete(art: "Path") -> bool:
     return True
 
 
-def parse_document(path: str) -> str:
-    """Docling: PDF/DOCX/... -> markdown with layout awareness."""
+def parse_document(path: str):
+    """Docling parse -> list of (paragraph_text, page_no|None) units.
+
+    Chunking from items (instead of flat markdown export) keeps page
+    provenance: every docling item carries .prov with the source page.
+    Returns None to signal "use the flat markdown fallback".
+    """
     from docling.document_converter import DocumentConverter, PdfFormatOption
     from docling.datamodel.base_models import InputFormat
     from docling.datamodel.pipeline_options import ThreadedPdfPipelineOptions
@@ -77,15 +82,53 @@ def parse_document(path: str) -> str:
         format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
     )
     result = converter.convert(Path(path))
-    return result.document.export_to_markdown()
+
+    try:
+        return _extract_paragraphs(result.document)
+    except Exception:  # noqa: BLE001 - fall back to flat markdown (no pages)
+        log.exception("item-level extraction failed; falling back to flat markdown")
+        return None
+
+
+def _extract_paragraphs(doc) -> list[tuple[str, int | None]]:
+    """Walk docling items -> (text, page) paragraph units."""
+    from docling_core.types.doc.labels import DocItemLabel
+    from docling.document_converter import ConversionResult  # noqa: F401 (typing hint)
+
+    text_labels = {
+        DocItemLabel.PARAGRAPH,
+        DocItemLabel.TITLE,
+        DocItemLabel.SECTION_HEADER,
+        DocItemLabel.CAPTION,
+        DocItemLabel.FOOTNOTE,
+        DocItemLabel.LIST_ITEM,
+    }
+    units: list[tuple[str, int | None]] = []
+    for item, _level in doc.iterate_items():
+        label = getattr(item, "label", None)
+        if label == DocItemLabel.TABLE:
+            try:
+                text = item.export_to_markdown(doc)
+            except Exception:  # noqa: BLE001
+                text = getattr(item, "text", None) or ""
+            if text.strip():
+                prov = getattr(item, "prov", None)
+                page = prov[0].page_no if prov else None
+                units.append((text.strip(), page))
+        elif label in text_labels or label == DocItemLabel.PARAGRAPH:
+            text = (getattr(item, "text", None) or "").strip()
+            if text:
+                prov = getattr(item, "prov", None)
+                page = prov[0].page_no if prov else None
+                units.append((text, page))
+        elif label == DocItemLabel.PICTURE:
+            # keep captions/grouped text; skip the image itself
+            continue
+    return units
 
 
 def chunk_markdown(md: str) -> list[str]:
-    """Simple recursive chunker on markdown headings/paragraphs.
-
-    BGE-M3 has 8k context, so chunk size is about retrieval granularity,
-    not model limits. ~800 tokens with overlap is a solid default.
-    """
+    """Flat fallback: chunk raw markdown text (no page info)."""
     size, overlap = settings.chunk_size, settings.chunk_overlap
     # split on paragraphs first, keeping headings with their section
     paragraphs = [p.strip() for p in md.split("\n\n") if p.strip()]
@@ -108,18 +151,60 @@ def chunk_markdown(md: str) -> list[str]:
     return [c for c in chunks if len(c.strip()) > 20]
 
 
+def chunk_units(units: list[tuple[str, int | None]]) -> list[dict]:
+    """Chunk (paragraph_text, page) units; a chunk keeps the list of source pages."""
+    size, overlap = settings.chunk_size, settings.chunk_overlap
+    chunks: list[dict] = []
+    current: list[tuple[str, int | None]] = []
+    current_len = 0
+    for text, page in units:
+        plen = len(text)
+        if current_len + plen > size and current:
+            chunks.append(_mk_chunk(current))
+            tail = "\n\n".join(t for t, _ in current)[-overlap:] if overlap > 0 else ""
+            current = [(tail, current[-1][1])] if tail else []
+            current_len = len(tail)
+        current.append((text, page))
+        current_len += plen
+    if current:
+        chunks.append(_mk_chunk(current))
+    return [c for c in chunks if len(c["text"].strip()) > 20]
+
+
+def _mk_chunk(current: list[tuple[str, int | None]]) -> dict:
+    pages = sorted({p for _, p in current if p is not None})
+    return {
+        "text": "\n\n".join(t for t, _ in current),
+        "page": pages[0] if pages else None,
+        "pages": pages,
+    }
+
+
 def ingest_document(path: str, filename: str) -> dict:
-    md = parse_document(path)
-    chunks = chunk_markdown(md)
+    units = parse_document(path)
+    if units is None:
+        md = result_markdown_fallback(path)
+        chunks = chunk_markdown(md)
+        chunks = [{"text": c, "page": None, "pages": []} for c in chunks]
+    else:
+        chunks = chunk_units(units)
     log.info("parsed %s -> %d chunks", filename, len(chunks))
 
     embedder = get_embedder()
     # BGE-M3 .encode() returns {'dense_vecs': ndarray, 'lexical_weights': [dict]}
-    out = embedder.encode(chunks, return_sparse=True)
+    out = embedder.encode([c["text"] for c in chunks], return_sparse=True)
     dense = [v.tolist() for v in out["dense_vecs"]]
     sparse = [{int(k): float(w) for k, w in lw.items()} for lw in out["lexical_weights"]]
 
     from storage import upsert_chunks
 
-    upsert_chunks(chunks, dense, sparse, doc=filename)
-    return {"chunks": len(chunks), "chars": len(md), "doc": filename}
+    upsert_chunks([c["text"] for c in chunks], dense, sparse, doc=filename, pages=[c["pages"] for c in chunks])
+    return {"chunks": len(chunks), "chars": sum(len(c["text"]) for c in chunks), "doc": filename}
+
+
+def result_markdown_fallback(path: str) -> str:
+    """Flat markdown export (used when item extraction fails)."""
+    from docling.document_converter import DocumentConverter
+
+    result = DocumentConverter().convert(Path(path))
+    return result.document.export_to_markdown()

@@ -34,21 +34,26 @@ def ensure_collection() -> None:
         log.info("created collection %s", settings.qdrant_collection)
 
 
-def upsert_chunks(chunks: list[str], dense: list, sparse: list, doc: str) -> None:
+def upsert_chunks(chunks: list[str], dense: list, sparse: list, doc: str, pages: list[list[int]] | None = None) -> None:
     c = _client()
-    points = [
-        models.PointStruct(
-            id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"{doc}:{i}")),
-            vector={
-                DENSE_NAME: dense[i],
-                SPARSE_NAME: models.SparseVector(
-                    indices=[int(k) for k in sparse[i]], values=[float(sparse[i][k]) for k in sparse[i]]
-                ),
-            },
-            payload={"text": chunks[i], "doc": doc, "chunk_id": i},
+    points = []
+    for i in range(len(chunks)):
+        payload = {"text": chunks[i], "doc": doc, "chunk_id": i}
+        if pages and pages[i]:
+            payload["page"] = pages[i][0]
+            payload["pages"] = pages[i]
+        points.append(
+            models.PointStruct(
+                id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"{doc}:{i}")),
+                vector={
+                    DENSE_NAME: dense[i],
+                    SPARSE_NAME: models.SparseVector(
+                        indices=[int(k) for k in sparse[i]], values=[float(sparse[i][k]) for k in sparse[i]]
+                    ),
+                },
+                payload=payload,
+            )
         )
-        for i in range(len(chunks))
-    ]
     c.upsert(collection_name=settings.qdrant_collection, points=points, wait=True)
 
 
@@ -82,6 +87,7 @@ def rrf_search(query: str, top_k: int) -> list[dict]:
                 "chunk_id": payload.get("chunk_id"),
                 "doc": payload.get("doc"),
                 "page": payload.get("page"),
+                "pages": payload.get("pages") or [],
                 "text": payload.get("text", ""),
                 "score": 0.0,
                 "rrf": p.score,

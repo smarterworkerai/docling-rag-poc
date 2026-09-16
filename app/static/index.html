@@ -212,9 +212,14 @@ async function ask() {
         for (const cit of data.citations) {
           const a = document.createElement('span');
           a.className = 'cite';
-          a.textContent = `📄 ${cit.doc} · chunk ${cit.chunk} · score ${cit.score}`;
+          const pageStr = cit.page ? ` · p.${cit.page}` : '';
+          a.textContent = `📄 ${cit.doc} · chunk ${cit.chunk}${pageStr} · score ${cit.score}`;
           a.title = cit.text;
-          a.onclick = () => alert(cit.text);
+          if (cit.page) {
+            a.onclick = () => window.open('/files/' + encodeURIComponent(cit.doc) + '#page=' + cit.page, '_blank');
+          } else {
+            a.onclick = () => alert(cit.text);
+          }
           c.appendChild(a);
         }
         m.appendChild(c);

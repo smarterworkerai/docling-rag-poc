@@ -1,6 +1,7 @@
 """FastAPI service: ingest documents, hybrid-search + rerank, grounded Q&A."""
 
 import os
+import shutil
 import tempfile
 import logging
 from pathlib import Path
@@ -78,6 +79,14 @@ async def upload_document(file: UploadFile = File(...)) -> dict:
         tmp_path = tmp.name
     try:
         stats = ingest_document(tmp_path, filename=file.filename or os.path.basename(tmp_path))
+        # keep the original for citation deep-links (file.pdf#page=N)
+        try:
+            files_dir = Path("/data/files")
+            files_dir.mkdir(parents=True, exist_ok=True)
+            dest = files_dir / Path(file.filename or "upload").name  # sanitize: name only
+            shutil.copyfile(tmp_path, dest)
+        except OSError:
+            log.exception("could not retain original file for page links")
         return {"status": "ok", "filename": file.filename, **stats}
     finally:
         os.unlink(tmp_path)
@@ -103,6 +112,7 @@ def query(req: QueryRequest) -> AnswerResponse:
             {
                 "doc": h["doc"],
                 "page": h.get("page"),
+                "pages": h.get("pages") or ([h["page"]] if h.get("page") else []),
                 "chunk": h["chunk_id"],
                 "score": round(h["score"], 4),
                 "text": h["text"][:500],
@@ -136,4 +146,21 @@ def delete_doc(doc: str = Query(...)) -> dict:
     from storage import delete_document
 
     n = delete_document(doc)
+    # also drop the retained original (page-link source), if present
+    try:
+        f = Path("/data/files") / Path(doc).name
+        if f.is_file():
+            f.unlink()
+    except OSError:
+        pass
     return {"status": "ok", "deleted_chunks": n, "doc": doc}
+
+
+@app.get("/files/{name}")
+def get_file(name: str) -> FileResponse:
+    """Serve a retained original document (for citation page deep-links)."""
+    safe = Path(name).name  # no path traversal
+    f = Path("/data/files") / safe
+    if not f.is_file():
+        raise HTTPException(404, "original file not retained (re-ingest to enable page links)")
+    return FileResponse(f)

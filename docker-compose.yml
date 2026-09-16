@@ -49,6 +49,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:
       - model-cache:/data/models
+      - files:/data/files
     ports:
       - "${RAG_PORT:-8000}:8000"
     # GPU passthrough; comment out on a CPU-only host
@@ -70,3 +71,4 @@ services:
 volumes:
   qdrant-data:
   model-cache:
+  files:
