@@ -33,6 +33,7 @@ services:
       LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
       MAX_ANSWER_TOKENS: ${MAX_ANSWER_TOKENS:-1024}
       # --- Docling A4000 Mobile tuning (defaults inside docling are 4) ---

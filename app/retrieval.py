@@ -89,14 +89,25 @@ def answer_question(question: str, hits: list[dict]):
 
     import os
 
-    api_key = os.getenv("OPENAI_API_KEY") or os.getenv("LLM_API_KEY")
-    if not api_key:
-        return None, False, "no LLM API key set (OPENAI_API_KEY); retrieval-only mode"
-    base_url = settings.llm_base_url or None
+    provider = settings.llm_provider.lower()
+    default_headers = None
+    if provider == "openrouter":
+        api_key = os.getenv("OPENROUTER_API_KEY") or os.getenv("LLM_API_KEY")
+        if not api_key:
+            return None, False, "no LLM API key set (OPENROUTER_API_KEY); retrieval-only mode"
+        base_url = settings.llm_base_url or "https://openrouter.ai/api/v1"
+        # optional attribution headers, appreciated by OpenRouter
+        default_headers = {"HTTP-Referer": "https://github.com/smarterworkerai/docling-rag-poc",
+                           "X-Title": "docling-rag-poc"}
+    else:
+        api_key = os.getenv("OPENAI_API_KEY") or os.getenv("LLM_API_KEY")
+        if not api_key:
+            return None, False, "no LLM API key set (OPENAI_API_KEY); retrieval-only mode"
+        base_url = settings.llm_base_url or None
     try:
         from openai import OpenAI
 
-        client = OpenAI(api_key=api_key, base_url=base_url)
+        client = OpenAI(api_key=api_key, base_url=base_url, default_headers=default_headers)
         resp = client.chat.completions.create(
             model=settings.llm_model,
             messages=[
