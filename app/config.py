@@ -32,6 +32,8 @@ class Settings:
     docling_ocr_batch_size: int = field(default_factory=lambda: _int("DOCLING_OCR_BATCH_SIZE", 32))
     docling_table_batch_size: int = field(default_factory=lambda: _int("DOCLING_TABLE_BATCH_SIZE", 4))
     docling_device: str = field(default_factory=lambda: os.getenv("DOCLING_DEVICE", "auto"))
+    # DEVICE applies to the embedding/rerank models: auto (CUDA if visible) | cuda | cpu
+    device: str = field(default_factory=lambda: os.getenv("DEVICE", "auto"))
 
     # --- Models ---
     embed_model: str = field(

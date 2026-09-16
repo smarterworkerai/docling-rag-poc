@@ -1,0 +1,27 @@
+# CPU-only variant of the stack: docker compose -f docker-compose.yml -f docker-compose.cpu.yml up --build
+#
+# For weak machines (e.g. 4 GB RAM, no GPU) after the corpus has been embedded
+# on the GPU box. Differences to the default compose:
+#   - no GPU reservation
+#   - RERANK_MODEL swapped to a small CPU cross-encoder (~110 MB) instead of
+#     Qwen3-Reranker-0.6B (~2.4 GB in fp32 — too heavy next to BGE-M3 on 4 GB)
+#   - Docling batches back to small defaults; parsing runs on CPU anyway
+#   - DEVICE=cpu so embedder/reranker load fp32 without probing CUDA
+#
+# Requirements file requirements-cpu.txt (plain torch, no CUDA wheels) is used
+# so the image stays ~2 GB smaller.
+services:
+  rag:
+    build:
+      context: .
+      dockerfile: Dockerfile.cpu
+    image: docling-rag-poc:local-cpu
+    environment:
+      RERANK_MODEL: ${RERANK_MODEL:-BAAI/bge-reranker-base}
+      DEVICE: ${DEVICE:-cpu}
+      DOCLING_LAYOUT_BATCH_SIZE: ${DOCLING_LAYOUT_BATCH_SIZE:-4}
+      DOCLING_OCR_BATCH_SIZE: ${DOCLING_OCR_BATCH_SIZE:-4}
+    deploy:
+      resources:
+        reservations:
+          devices: !reset []

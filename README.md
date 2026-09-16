@@ -111,6 +111,46 @@ to answer rather than letting the LLM improvise from its training data.
 - **CPU-only host** → set `DOCLING_DEVICE=cpu` and remove the `deploy.resources` GPU block from `docker-compose.yml`; expect ~10 pages/min parsing instead of ~1–2 pages/s.
 - **Ingestion speed**: a mixed 300-page PDF takes roughly 5–10 min on GPU with these batch sizes.
 
+## Running on a weak CPU-only machine (after embedding on the GPU box)
+
+Once your corpus is embedded (Qdrant holds the index), you can move the whole
+stack to a small fanless/office machine — 4 GB RAM, no GPU — and keep querying
+it. Queries still need the embedder + reranker at *query time* (one sentence +
+top-50 chunks), which runs on CPU in ~1–3 s at this scale. Ingestion on such a
+box also works but is slow (~5–10 pages/min parsing); the intended flow is
+ingest on the GPU machine, query anywhere.
+
+The repo ships a CPU overlay for exactly this:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.cpu.yml up --build -d
+```
+
+What the overlay (`docker-compose.cpu.yml`) changes:
+
+- **No GPU reservation** — runs anywhere
+- **`RERANK_MODEL=BAAI/bge-reranker-base`** — a ~110 MB cross-encoder instead of
+  Qwen3-Reranker-0.6B (~2.4 GB fp32, too heavy next to BGE-M3 on 4 GB RAM).
+  Ranking quality drops slightly vs Qwen3; the refusal threshold (`min_score`)
+  may need recalibration because score distributions differ between reranker
+  families — if valid questions get refused, lower it; if junk gets answered, raise it.
+- **`DEVICE=cpu`** — embedder/reranker load fp32 without probing CUDA, and BGE-M3
+  skips fp16 (no benefit on CPU)
+- **Docling batches back to 4** — irrelevant without a GPU
+- **`Dockerfile.cpu` + `requirements-cpu.txt`** — plain torch wheel, ~2 GB smaller
+  image than the CUDA build
+
+Both reranker families are auto-detected (`app/retrieval.py`): Qwen3 models use
+their Yes/No-logit pattern, everything else (bge-reranker, mxbai-rerank, …) is
+loaded as a standard cross-encoder with sigmoid scoring — so
+`RERANK_MODEL=mixedbread/mxbai-rerank-xsmall` etc. also work with no code change.
+
+**Moving an existing index:** back up Qdrant on the GPU box
+(`docker run --rm -v docling-rag-poc_qdrant-data:/data -v $(pwd):/backup alpine tar czf /backup/qdrant.tgz /data`),
+restore into the new host's volume, `docker compose up`. The model-cache volume
+does not need migrating (models re-download), only the Qdrant volume holds your
+index.
+
 ## Endpoints
 
 | Method | Path | Purpose |

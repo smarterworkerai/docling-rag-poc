@@ -1,0 +1,27 @@
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    HF_HOME=/data/models \
+    TOKENIZERS_PARALLELISM=false \
+    DOCLING_ARTIFACTS_PATH=/data/models/docling
+
+# libgomp for torch/transformers ops
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /srv
+
+COPY requirements-cpu.txt .
+RUN pip install -r requirements-cpu.txt
+
+COPY app/ ./app/
+
+RUN mkdir -p /data/models
+VOLUME ["/data/models"]
+
+EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=10s --start-period=1800s --retries=5 \
+    CMD curl -fsS http://localhost:8000/health || exit 1
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

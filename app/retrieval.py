@@ -21,20 +21,35 @@ def get_embedder():
     from FlagEmbedding import BGEM3FlagModel
 
     log.info("loading embedder %s (hf cache %s)", settings.embed_model, settings.hf_cache)
-    return BGEM3FlagModel(settings.embed_model, use_fp16=True)
+    # fp16 on GPU; on CPU-only hosts fp32 is used (fp16 gives no speedup there)
+    use_fp16 = settings.device.startswith("cuda")
+    return BGEM3FlagModel(settings.embed_model, use_fp16=use_fp16)
 
 
 @lru_cache(maxsize=1)
 def get_reranker():
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    """Dispatches on model family: Qwen3 (causal LM, yes/no logits) vs
+    cross-encoders like bge-reranker / mxbai-rerank (sequence classification)."""
     import torch
+    from transformers import AutoTokenizer
 
     model_name = settings.rerank_model
     log.info("loading reranker %s", model_name)
+    device = settings.device if settings.device != "auto" else ("cuda" if torch.cuda.is_available() else "cpu")
+    dtype = torch.float16 if device.startswith("cuda") else torch.float32
     tok = AutoTokenizer.from_pretrained(model_name, pad_token=None, trust_remote_code=False)
-    model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.float16)
-    model = model.to("cuda" if torch.cuda.is_available() else "cpu").eval()
-    return tok, model
+    if "qwen3-reranker" in model_name.lower():
+        from transformers import AutoModelForCausalLM
+
+        model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=dtype)
+        kind = "qwen3"
+    else:
+        from transformers import AutoModelForSequenceClassification
+
+        model = AutoModelForSequenceClassification.from_pretrained(model_name, torch_dtype=dtype)
+        kind = "cross-encoder"
+    model = model.to(device).eval()
+    return tok, model, kind, device
 
 
 def embed_query(query: str):
@@ -46,23 +61,38 @@ def embed_query(query: str):
 
 
 def _rerank(query: str, texts: list[str]) -> list[float]:
-    """Qwen3-Reranker: yes/no logit scoring (official usage pattern)."""
-    tok, model = get_reranker()
+    """Score query/doc pairs; returns relevance probabilities in [0, 1].
+
+    Two model families are supported:
+    - Qwen3-Reranker: causal LM scored via Yes/No token logits (official pattern)
+    - standard cross-encoders (bge-reranker, mxbai-rerank, ...): sigmoid over
+      the relevance logit — no Yes/No prompt template involved
+    """
+    tok, model, kind, device = get_reranker()
     import torch
 
-    prefix = "<|im_start|>system\nJudge whether the Document meets the requirements based on the query. " \
-             "Only answer Yes or No.<|im_end|>\n<|im_start|>user\n"
-    suffix = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
-    pairs = [
-        f"{prefix}Query: {query}\nDocument: {t}{suffix}" for t in texts
-    ]
-    with torch.no_grad():
-        inputs = tok(pairs, padding=True, truncation=True, max_length=2048, return_tensors="pt").to(model.device)
-        scores = model(**inputs).logits[:, -1, :]
-    yes = tok("Yes", add_special_tokens=False).input_ids[0]
-    no = tok("No", add_special_tokens=False).input_ids[0]
-    logits = scores[:, [yes, no]].float()
-    probs = torch.softmax(logits, dim=-1)[:, 0]
+    if kind == "qwen3":
+        prefix = "<|im_start|>system\nJudge whether the Document meets the requirements based on the query. " \
+                 "Only answer Yes or No.<|im_end|>\n<|im_start|>user\n"
+        suffix = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+        pairs = [
+            f"{prefix}Query: {query}\nDocument: {t}{suffix}" for t in texts
+        ]
+        with torch.no_grad():
+            inputs = tok(pairs, padding=True, truncation=True, max_length=2048,
+                         return_tensors="pt").to(device)
+            scores = model(**inputs).logits[:, -1, :]
+        yes = tok("Yes", add_special_tokens=False).input_ids[0]
+        no = tok("No", add_special_tokens=False).input_ids[0]
+        logits = scores[:, [yes, no]].float()
+        probs = torch.softmax(logits, dim=-1)[:, 0]
+    else:
+        pairs = [[query, t] for t in texts]
+        with torch.no_grad():
+            inputs = tok(pairs, padding=True, truncation=True, max_length=1024,
+                         return_tensors="pt").to(device)
+            logits = model(**inputs).logits.squeeze(-1).float()
+            probs = torch.sigmoid(logits)
     return probs.tolist()
 
 
