@@ -114,7 +114,10 @@ def ingest_document(path: str, filename: str) -> dict:
     log.info("parsed %s -> %d chunks", filename, len(chunks))
 
     embedder = get_embedder()
-    dense, sparse = embedder.embed(chunks)  # dense: list[vec], sparse: list[{id:weight}]
+    # BGE-M3 .encode() returns {'dense_vecs': ndarray, 'lexical_weights': [dict]}
+    out = embedder.encode(chunks, return_sparse=True)
+    dense = [v.tolist() for v in out["dense_vecs"]]
+    sparse = [{int(k): float(w) for k, w in lw.items()} for lw in out["lexical_weights"]]
 
     from storage import upsert_chunks
 
