@@ -1,0 +1,68 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.15.1
+    restart: unless-stopped
+    volumes:
+      - qdrant-data:/qdrant/storage
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"   # REST + dashboard (http://localhost:6333/dashboard)
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':< /dev/tcp/127.0.0.1/6333'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  rag:
+    build:
+      context: .
+    image: docling-rag-poc:local
+    restart: unless-stopped
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-docs}
+      EMBED_DIM: ${EMBED_DIM:-1024}
+      CHUNK_SIZE: ${CHUNK_SIZE:-800}
+      CHUNK_OVERLAP: ${CHUNK_OVERLAP:-150}
+      RETRIEVAL_LIMIT: ${RETRIEVAL_LIMIT:-50}
+      EMBED_MODEL: ${EMBED_MODEL:-BAAI/bge-m3}
+      RERANK_MODEL: ${RERANK_MODEL:-Qwen/Qwen3-Reranker-0.6B}
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      MAX_ANSWER_TOKENS: ${MAX_ANSWER_TOKENS:-1024}
+      # --- Docling A4000 Mobile tuning (defaults inside docling are 4) ---
+      DOCLING_LAYOUT_BATCH_SIZE: ${DOCLING_LAYOUT_BATCH_SIZE:-32}
+      DOCLING_OCR_BATCH_SIZE: ${DOCLING_OCR_BATCH_SIZE:-32}
+      DOCLING_TABLE_BATCH_SIZE: ${DOCLING_TABLE_BATCH_SIZE:-4}
+      DOCLING_DEVICE: ${DOCLING_DEVICE:-auto}
+      HF_HOME: /data/models
+      DOCLING_ARTIFACTS_PATH: /data/models/docling
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - model-cache:/data/models
+    ports:
+      - "${RAG_PORT:-8000}:8000"
+    # GPU passthrough; comment out on a CPU-only host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      # first start downloads ~3 GB of models; start-period must cover it
+      start_period: 1800s
+      retries: 5
+
+volumes:
+  qdrant-data:
+  model-cache:

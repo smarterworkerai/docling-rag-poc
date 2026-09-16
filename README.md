@@ -1,0 +1,110 @@
+# Docling RAG PoC
+
+Local, document-grounded Q&A with hybrid retrieval and reranking — tuned for a
+laptop-class workstation (RTX A4000 Mobile 8 GB, 32 GB RAM). Everything runs
+locally except the final LLM call, which uses a cloud provider API.
+
+## What's inside
+
+- **Docling** (MIT) — layout-aware parsing of PDF, DOCX, PPTX, XLSX, HTML, MD
+- **BGE-M3** (MIT) — one model produces dense + sparse (lexical) embeddings → true hybrid search
+- **Qdrant** (Apache-2.0) — vector DB with named dense + sparse vectors and server-side RRF fusion
+- **Qwen3-Reranker-0.6B** (Apache-2.0) — second-stage reranking of retrieved candidates
+- **Cloud LLM via API** — grounded answer generation, instructed to answer only from context and refuse otherwise (no internet knowledge)
+
+```
+PDF/DOCX/... --Docling--> markdown --chunk--> BGE-M3 --> Qdrant (dense+sparse)
+query --> Qdrant RRF hybrid --> top-50 --> Qwen3 rerank --> top-k --> cloud LLM --> cited answer
+```
+
+VRAM budget on 8 GB: BGE-M3 ≈ 1.1 GB + reranker ≈ 1.3 GB + Docling batches ≈ 3–4 GB.
+
+## Quickstart
+
+```bash
+cp .env.example .env
+# edit .env: set OPENAI_API_KEY (mandatory), everything else has working defaults
+docker compose up --build
+```
+
+First start downloads ~3 GB of models (BGE-M3, Qwen3-Reranker, Docling layout
+models) into the `model-cache` volume; the container health check allows 30 min
+for this. Subsequent starts are fast.
+
+API then available at `http://localhost:8000` (docs at `/docs`),
+Qdrant dashboard at `http://localhost:6333/dashboard`.
+
+## Use it
+
+```bash
+# ingest a document
+curl -s -X POST http://localhost:8000/documents -F "file=@some.pdf"
+
+# retrieval only (no LLM): hybrid search + rerank, ranked chunks
+curl -s -X POST http://localhost:8000/search \
+  -H 'Content-Type: application/json' \
+  -d '{"question": "What is said about warranty?", "top_k": 5}'
+
+# grounded Q&A with citations
+curl -s -X POST http://localhost:8000/query \
+  -H 'Content-Type: application/json' \
+  -d '{"question": "What is said about warranty?"}'
+```
+
+Response shape of `/query`:
+
+```json
+{
+  "answer": "...",
+  "answered": true,
+  "reason": "ok",
+  "citations": [{"doc": "some.pdf", "chunk": 42, "score": 0.87, "text": "..."}]
+}
+```
+
+If nothing relevant is retrieved (`min_score` not met), the service **refuses**
+to answer rather than letting the LLM improvise from its training data.
+
+## .env reference
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `OPENAI_API_KEY` | — | **Required.** Cloud LLM key (the only internet dependency) |
+| `LLM_BASE_URL` / `LLM_API_KEY` | empty | Use any OpenAI-compatible endpoint (Groq, OpenRouter, vLLM, …) instead of OpenAI |
+| `LLM_MODEL` | `gpt-4o-mini` | Generation model name |
+| `RAG_PORT` / `QDRANT_PORT` | 8000 / 6333 | Host ports for API and Qdrant dashboard |
+| `QDRANT_COLLECTION` | `docs` | Qdrant collection name |
+| `EMBED_MODEL` | `BAAI/bge-m3` | Embedding model (dense+sparse in one pass) |
+| `RERANK_MODEL` | `Qwen/Qwen3-Reranker-0.6B` | Second-stage reranker |
+| `EMBED_DIM` | 1024 | Dense vector dimension of `EMBED_MODEL` |
+| `CHUNK_SIZE` / `CHUNK_OVERLAP` | 800 / 150 | Chunker settings (characters) |
+| `RETRIEVAL_LIMIT` | 50 | Candidates fetched per retrieval leg before reranking |
+| `DOCLING_LAYOUT_BATCH_SIZE` | 32 | Docling GPU batch — **raised from default 4** for A4000 Mobile |
+| `DOCLING_OCR_BATCH_SIZE` | 32 | Docling OCR GPU batch — **raised from default 4** |
+| `DOCLING_TABLE_BATCH_SIZE` | 4 | Table structure batch (not GPU-batched yet upstream) |
+| `DOCLING_DEVICE` | `auto` | `auto` = CUDA when visible; `cpu` forces CPU parsing |
+| `MAX_ANSWER_TOKENS` | 1024 | LLM answer length cap |
+| `LOG_LEVEL` | `INFO` | App logging |
+
+### Tuning notes
+
+- **OOM during ingestion** → lower `DOCLING_LAYOUT_BATCH_SIZE`/`DOCLING_OCR_BATCH_SIZE` (32 → 16 → 8).
+- **16 GB GPU** → swap `RERANK_MODEL=Qwen/Qwen3-Reranker-4B` for better ranking quality.
+- **CPU-only host** → set `DOCLING_DEVICE=cpu` and remove the `deploy.resources` GPU block from `docker-compose.yml`; expect ~10 pages/min parsing instead of ~1–2 pages/s.
+- **Ingestion speed**: a mixed 300-page PDF takes roughly 5–10 min on GPU with these batch sizes.
+
+## Endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/health` | liveness |
+| POST | `/documents` | upload + ingest a file (multipart) |
+| POST | `/search` | hybrid + rerank, returns chunks (no LLM call) |
+| POST | `/query` | full pipeline: retrieval + grounded answer + citations |
+
+Interactive OpenAPI docs: `http://localhost:8000/docs`.
+
+## Licenses of components
+
+Docling MIT · BGE-M3 MIT · Qdrant Apache-2.0 · Qwen3-Reranker Apache-2.0 ·
+this repo MIT.
