@@ -147,11 +147,51 @@ their Yes/No-logit pattern, everything else (bge-reranker, mxbai-rerank, …) is
 loaded as a standard cross-encoder with sigmoid scoring — so
 `RERANK_MODEL=mixedbread/mxbai-rerank-xsmall` etc. also work with no code change.
 
-**Moving an existing index:** back up Qdrant on the GPU box
-(`docker run --rm -v docling-rag-poc_qdrant-data:/data -v $(pwd):/backup alpine tar czf /backup/qdrant.tgz /data`),
-restore into the new host's volume, `docker compose up`. The model-cache volume
-does not need migrating (models re-download), only the Qdrant volume holds your
-index.
+### Migrating between machines (ingest on GPU box → query on weak box)
+
+Only two volumes hold state; everything else regenerates. **Stop the stack on
+both machines** (`docker compose stop`) while copying — Qdrant keeps state in
+memory and a live copy can be inconsistent. Check the exact volume name first
+with `docker volume ls | grep qdrant` (it is `<project-dir>_qdrant-data`, so it
+differs if the checkout directory is named differently).
+
+**1. Qdrant volume — mandatory. This IS your index**: all chunks, dense +
+sparse vectors and payloads. The original PDFs are not needed for querying.
+
+```bash
+# on the ingestion (GPU) machine
+docker run --rm -v docling-rag-poc_qdrant-data:/data -v $(pwd):/backup alpine \
+  tar czf /backup/qdrant-snapshot.tgz -C /data .
+
+# after copying qdrant-snapshot.tgz to the target machine:
+docker compose up -d qdrant                       # start the empty qdrant first
+docker run --rm -v docling-rag-poc_qdrant-data:/data -v $(pwd):/backup alpine \
+  sh -c "cd /data && tar xzf /backup/qdrant-snapshot.tgz"
+docker compose restart qdrant
+```
+
+**2. Model-cache volume — optional** (~3 GB; skips the first-start model
+download). Same commands with `docling-rag-poc_model-cache` instead of
+`qdrant-data`. If you skip it, models re-download automatically. Note: when the
+target uses a different reranker than the source (e.g. CPU overlay's
+bge-reranker-base vs the GPU default Qwen3-0.6B), the cache holds whichever
+models were loaded there — missing ones simply download on first use.
+
+**3. Code + config:** `git clone` + `docker compose build` (plus
+`-f docker-compose.cpu.yml` on the CPU target). Recreate `.env` from
+`.env.example` — don't blindly copy it across profiles, since the reranker
+default differs between GPU and CPU setups.
+
+**Sanity check after migration:**
+
+```bash
+curl -s http://localhost:8000/documents        # should list all docs + chunk counts
+curl -s -X POST http://localhost:8000/search -H 'Content-Type: application/json' \
+  -d '{"question": "<something you know is in the docs>"}'
+```
+
+`/search` is the cleanest check — it exercises embedding + Qdrant + reranker
+without spending an LLM call. If it returns hits, the migration succeeded.
 
 ## Endpoints
 
