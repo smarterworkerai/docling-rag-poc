@@ -82,6 +82,18 @@ def parse_document(path: str):
         format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
     )
     result = converter.convert(Path(path))
+    # release the pipeline's GPU memory (layout/OCR models, ~2-3 GB) so the
+    # embedder/reranker have room; docling re-inits pipelines on next convert
+    try:
+        for _fmt, pipeline in list(getattr(converter, "initialized_pipelines", {}).items()):
+            del pipeline
+        converter.initialized_pipelines.clear()
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:  # noqa: BLE001
+        pass
 
     try:
         return _extract_paragraphs(result.document)

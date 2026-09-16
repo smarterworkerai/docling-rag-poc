@@ -87,7 +87,9 @@ def _rerank(query: str, texts: list[str]) -> list[float]:
             with torch.no_grad():
                 inputs = tok(part, padding=True, truncation=True, max_length=2048,
                              return_tensors="pt").to(device)
-                out = model(**inputs).logits[:, -1, :]
+                # logits_to_keep=1: only the last position's logits — the lm_head
+                # over the full 151k vocab x seq_len was OOMing (GBs for nothing)
+                out = model(**inputs, logits_to_keep=1).logits[:, -1, :]
             yes = tok("Yes", add_special_tokens=False).input_ids[0]
             no = tok("No", add_special_tokens=False).input_ids[0]
             logits = out[:, [yes, no]].float()
