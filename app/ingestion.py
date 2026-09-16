@@ -22,13 +22,32 @@ def _ensure_docling_artifacts() -> "Path":
         art = Path(docling_settings.cache_dir) / "models"
     art = Path(art)
     art.mkdir(parents=True, exist_ok=True)
-    if any(art.iterdir()):
+    if _artifacts_complete(art):
         return art
-    log.info("docling artifacts empty at %s - downloading models (one-time)", art)
+    log.info("docling artifacts incomplete at %s - downloading models (incremental)", art)
     from docling.utils.model_downloader import download_models
 
     download_models(output_dir=art, progress=True)
     return art
+
+
+def _artifacts_complete(art: "Path") -> bool:
+    """Check for the actual files the pipeline resolves, not just a non-empty dir.
+    A previous crashed download can leave the dir partially populated."""
+    rapid = art / "RapidOcr"
+    needed_rapid = [
+        "PP-OCRv6_det_small.pth",
+        "ch_ptocr_mobile_v2.0_cls_mobile.pth",
+        "PP-OCRv6_rec_small.pth",
+        "ppocrv6_dict.txt",
+    ]
+    if not all((rapid / f).exists() for f in needed_rapid):
+        return False
+    # layout model lands in '<org>--<repo>' (hf repo id with / replaced)
+    layout_dirs = [d for d in art.glob("*--*") if d.is_dir()]
+    if not layout_dirs or not any(layout_dirs[0].glob("**/*")):
+        return False
+    return True
 
 
 def parse_document(path: str) -> str:
