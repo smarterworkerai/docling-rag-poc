@@ -6,8 +6,10 @@ ENV PYTHONUNBUFFERED=1 \
     TOKENIZERS_PARALLELISM=false \
     DOCLING_ARTIFACTS_PATH=/data/models/docling
 
-# libgomp for torch/transformers ops
-RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 curl \
+# libgomp for torch/transformers ops; libgl1/libglib2/libxcb deps for
+# opencv (pulled by docling's rapidocr OCR) - slim images lack them
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libgomp1 curl libgl1 libglib2.0-0 libxcb1 libsm6 libxext6 libxrender1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /srv
