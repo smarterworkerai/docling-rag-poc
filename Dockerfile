@@ -17,6 +17,10 @@ RUN pip install --extra-index-url https://download.pytorch.org/whl/cu121 -r requ
 
 COPY app/ ./app/
 
+# app modules use flat imports (config, storage, ...) -> run from app/ with it on PYTHONPATH
+ENV PYTHONPATH=/srv/app
+WORKDIR /srv/app
+
 RUN mkdir -p /data/models
 VOLUME ["/data/models"]
 
@@ -24,4 +28,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=180s --retries=5 \
     CMD curl -fsS http://localhost:8000/health || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
