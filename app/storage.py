@@ -88,3 +88,51 @@ def rrf_search(query: str, top_k: int) -> list[dict]:
             }
         )
     return hits
+
+
+def list_documents() -> list[dict]:
+    """Aggregate chunk counts per document via a payload index."""
+    c = _client()
+    # ensure a payload index on doc for efficient scrolling
+    try:
+        c.create_payload_index(
+            collection_name=settings.qdrant_collection,
+            field_name="doc",
+            field_schema=models.PayloadSchemaType.KEYWORD,
+        )
+    except Exception:  # noqa: BLE001  (already exists)
+        pass
+    docs: dict[str, int] = {}
+    points, _next = c.scroll(
+        collection_name=settings.qdrant_collection,
+        with_payload=["doc"],
+        with_vectors=False,
+        limit=256,
+    )
+    for point in points or []:
+        doc = (point.payload or {}).get("doc")
+        if doc:
+            docs[doc] = docs.get(doc, 0) + 1
+    return [{"doc": d, "chunks": n} for d, n in sorted(docs.items())]
+
+
+def delete_document(doc: str) -> int:
+    """Delete all chunks of a document by its payload; returns deleted count."""
+    c = _client()
+    info = c.count(
+        collection_name=settings.qdrant_collection,
+        count_filter=models.Filter(
+            must=[models.FieldCondition(key="doc", match=models.MatchValue(value=doc))]
+        ),
+        exact=True,
+    )
+    n = info.count
+    c.delete(
+        collection_name=settings.qdrant_collection,
+        points_selector=models.FilterSelector(
+            filter=models.Filter(
+                must=[models.FieldCondition(key="doc", match=models.MatchValue(value=doc))]
+            )
+        ),
+    )
+    return n

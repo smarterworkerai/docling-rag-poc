@@ -3,10 +3,13 @@
 import os
 import tempfile
 import logging
+from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from config import settings
@@ -17,6 +20,7 @@ logging.basicConfig(level=settings.log_level)
 log = logging.getLogger("docling-rag")
 
 app = FastAPI(title="docling-rag-poc", version="0.1.0")
+_STATIC_DIR = Path(__file__).parent / "static"
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -106,3 +110,30 @@ def query(req: QueryRequest) -> AnswerResponse:
             for h in hits
         ],
     )
+
+
+# ---- UI + document management ----
+
+app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+
+
+@app.get("/", include_in_schema=False)
+def index() -> FileResponse:
+    return FileResponse(os.path.join(_STATIC_DIR, "index.html"))
+
+
+@app.get("/documents")
+def list_docs() -> dict:
+    """List ingested documents with chunk counts (for the UI sidebar)."""
+    from storage import list_documents
+
+    return {"documents": list_documents()}
+
+
+@app.delete("/documents")
+def delete_doc(doc: str = Query(...)) -> dict:
+    """Remove a document and all its chunks from the index."""
+    from storage import delete_document
+
+    n = delete_document(doc)
+    return {"status": "ok", "deleted_chunks": n, "doc": doc}

@@ -36,9 +36,24 @@ Qdrant dashboard at `http://localhost:6333/dashboard`.
 
 ## Use it
 
+### Web UI
+
+Open `http://localhost:8000/` — a built-in chat UI:
+
+- **left sidebar:** drag&drop (or click) files to ingest, live ingest status, list of ingested documents with chunk counts, per-document delete
+- **chat:** ask questions, answers come back with clickable source citations (hover shows the chunk text); if retrieval finds nothing relevant the bot refuses instead of guessing
+
+### API
+
 ```bash
 # ingest a document
 curl -s -X POST http://localhost:8000/documents -F "file=@some.pdf"
+
+# list ingested documents
+curl -s http://localhost:8000/documents
+
+# delete a document (and its chunks) from the index
+curl -s -X DELETE "http://localhost:8000/documents?doc=some.pdf"
 
 # retrieval only (no LLM): hybrid search + rerank, ranked chunks
 curl -s -X POST http://localhost:8000/search \
@@ -100,8 +115,11 @@ to answer rather than letting the LLM improvise from its training data.
 
 | Method | Path | Purpose |
 |---|---|---|
+| GET | `/` | built-in web UI (chat, ingest, document list) |
 | GET | `/health` | liveness |
 | POST | `/documents` | upload + ingest a file (multipart) |
+| GET | `/documents` | list ingested documents with chunk counts |
+| DELETE | `/documents?doc=…` | remove a document and all its chunks |
 | POST | `/search` | hybrid + rerank, returns chunks (no LLM call) |
 | POST | `/query` | full pipeline: retrieval + grounded answer + citations |
 

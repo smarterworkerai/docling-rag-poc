@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>docling-rag-poc</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #161a21; --panel2: #1c212b; --border: #2a3140;
+    --text: #e6e9ef; --muted: #8b94a7; --accent: #5eead4; --accent2: #818cf8;
+    --danger: #f87171; --ok: #4ade80;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+         background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
+
+  header { display: flex; align-items: center; gap: 12px; padding: 10px 16px;
+           background: var(--panel); border-bottom: 1px solid var(--border); }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  header h1 span { color: var(--accent); }
+  header .spacer { flex: 1; }
+  #health { font-size: 12px; color: var(--muted); }
+  #health.ok { color: var(--ok); }
+
+  .layout { flex: 1; display: flex; min-height: 0; }
+
+  /* ---- sidebar ---- */
+  aside { width: 280px; background: var(--panel); border-right: 1px solid var(--border);
+          display: flex; flex-direction: column; min-height: 0; }
+  aside .section { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  aside h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+             color: var(--muted); margin: 0 0 10px; }
+  #dropzone { border: 1.5px dashed var(--border); border-radius: 8px; padding: 18px 10px;
+              text-align: center; color: var(--muted); cursor: pointer; transition: .15s; }
+  #dropzone.drag, #dropzone:hover { border-color: var(--accent); color: var(--accent); }
+  #ingest-status { font-size: 12px; margin-top: 8px; min-height: 16px; color: var(--muted); }
+  #ingest-status.ok { color: var(--ok); } #ingest-status.err { color: var(--danger); }
+
+  #doclist { flex: 1; overflow-y: auto; padding: 8px; }
+  .doc { display: flex; align-items: center; gap: 8px; background: var(--panel2);
+         border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-bottom: 6px; }
+  .doc .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+  .doc .count { font-size: 11px; color: var(--muted); background: var(--bg);
+                border-radius: 10px; padding: 1px 8px; }
+  .doc button { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 14px; }
+  .doc button:hover { color: var(--danger); }
+  .empty { color: var(--muted); font-size: 12px; padding: 8px; }
+
+  /* ---- chat ---- */
+  main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #chat { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+  .msg { max-width: 76%; border-radius: 12px; padding: 10px 14px; white-space: pre-wrap; word-wrap: break-word; }
+  .msg.user { align-self: flex-end; background: #2b3a5e; }
+  .msg.bot { align-self: flex-start; background: var(--panel2); border: 1px solid var(--border); }
+  .msg.bot.refused { border-color: var(--danger); color: var(--muted); font-style: italic; }
+  .cites { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);
+           font-size: 12px; color: var(--muted); }
+  .cite { display: block; margin-top: 4px; color: var(--accent2); cursor: pointer; }
+  .cite:hover { text-decoration: underline; }
+  .hint { align-self: center; color: var(--muted); font-size: 13px; text-align: center; margin: auto 0; }
+
+  #inputbar { display: flex; gap: 10px; padding: 14px 20px; border-top: 1px solid var(--border);
+              background: var(--panel); }
+  #q { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+       color: var(--text); padding: 10px 14px; font: inherit; outline: none; }
+  #q:focus { border-color: var(--accent2); }
+  #send { background: var(--accent2); color: #0f1115; border: none; border-radius: 10px;
+          padding: 0 22px; font-weight: 600; cursor: pointer; }
+  #send:disabled { opacity: .5; cursor: default; }
+  .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--muted);
+             border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite;
+             vertical-align: -2px; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<header>
+  <h1>docling<span>-rag-</span>poc</h1>
+  <div class="spacer"></div>
+  <div id="health">checking…</div>
+</header>
+
+<div class="layout">
+  <aside>
+    <div class="section">
+      <h2>Ingest documents</h2>
+      <div id="dropzone">drop files here<br>or click to browse<br><small>pdf · docx · pptx · xlsx · html · md · txt</small></div>
+      <input type="file" id="fileinput" multiple hidden>
+      <div id="ingest-status"></div>
+    </div>
+    <div class="section" style="flex:1; display:flex; flex-direction:column; min-height:0; border-bottom:none;">
+      <h2>Knowledge base</h2>
+      <div id="doclist"><div class="empty">loading…</div></div>
+    </div>
+  </aside>
+
+  <main>
+    <div id="chat">
+      <div class="hint">Ask anything about your ingested documents.<br>
+      Answers are grounded in retrieved chunks only — with citations.<br>
+      If retrieval finds nothing relevant, the bot refuses instead of guessing.</div>
+    </div>
+    <div id="inputbar">
+      <input id="q" placeholder="Ask a question…" autocomplete="off">
+      <button id="send">Send</button>
+    </div>
+  </main>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const chat = $('#chat'), q = $('#q'), send = $('#send');
+
+/* ---- health ---- */
+async function checkHealth() {
+  const el = $('#health');
+  try {
+    const r = await fetch('/health');
+    if (!r.ok) throw 0;
+    el.textContent = '● service online'; el.className = 'ok';
+  } catch { el.textContent = '● service offline'; el.className = 'err'; }
+  setTimeout(checkHealth, 30000);
+}
+checkHealth();
+
+/* ---- documents ---- */
+async function refreshDocs() {
+  const list = $('#doclist');
+  try {
+    const r = await fetch('/documents');
+    const data = await r.json();
+    if (!data.documents.length) {
+      list.innerHTML = '<div class="empty">no documents yet — ingest some on the left</div>';
+      return;
+    }
+    list.innerHTML = '';
+    for (const d of data.documents) {
+      const row = document.createElement('div');
+      row.className = 'doc';
+      row.innerHTML = `<span class="name" title="${esc(d.doc)}">${esc(d.doc)}</span>
+                       <span class="count">${d.chunks} chunks</span>
+                       <button title="remove">✕</button>`;
+      row.querySelector('button').onclick = () => removeDoc(d.doc);
+      list.appendChild(row);
+    }
+  } catch { list.innerHTML = '<div class="empty">failed to load documents</div>'; }
+}
+async function removeDoc(doc) {
+  if (!confirm(`Remove '${doc}' and all its chunks from the index?`)) return;
+  await fetch('/documents?doc=' + encodeURIComponent(doc), { method: 'DELETE' });
+  refreshDocs();
+}
+refreshDocs();
+
+/* ---- ingest ---- */
+const dz = $('#dropzone'), fi = $('#fileinput'), status = $('#ingest-status');
+dz.onclick = () => fi.click();
+dz.ondragover = e => { e.preventDefault(); dz.classList.add('drag'); };
+dz.ondragleave = () => dz.classList.remove('drag');
+dz.ondrop = e => { e.preventDefault(); dz.classList.remove('drag'); upload(e.dataTransfer.files); };
+fi.onchange = () => { upload(fi.files); fi.value = ''; };
+
+async function upload(files) {
+  for (const f of files) {
+    status.className = ''; status.textContent = `⏳ ingesting ${f.name} (parsing + embedding — this can take minutes for large PDFs)`;
+    const fd = new FormData();
+    fd.append('file', f);
+    try {
+      const r = await fetch('/documents', { method: 'POST', body: fd });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.detail || r.statusText);
+      status.className = 'ok';
+      status.textContent = `✓ ${f.name}: ${data.chunks} chunks indexed`;
+      refreshDocs();
+    } catch (e) { status.className = 'err'; status.textContent = `✗ ${f.name}: ${e.message}`; }
+  }
+}
+
+/* ---- chat ---- */
+function addMsg(text, cls) {
+  const m = document.createElement('div');
+  m.className = 'msg ' + cls;
+  m.textContent = text;
+  chat.appendChild(m);
+  chat.scrollTop = chat.scrollHeight;
+  return m;
+}
+function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+
+async function ask() {
+  const text = q.value.trim();
+  if (!text || send.disabled) return;
+  q.value = '';
+  addMsg(text, 'user');
+  send.disabled = true;
+  const m = addMsg('', 'bot');
+  m.innerHTML = '<span class="spinner"></span>retrieving & reasoning…';
+  try {
+    const r = await fetch('/query', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: text, top_k: 5 })
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || r.statusText);
+    if (data.answered) {
+      m.classList.remove('refused');
+      m.textContent = data.answer;
+      if (data.citations?.length) {
+        const c = document.createElement('div');
+        c.className = 'cites';
+        c.textContent = 'sources:';
+        for (const cit of data.citations) {
+          const a = document.createElement('span');
+          a.className = 'cite';
+          a.textContent = `📄 ${cit.doc} · chunk ${cit.chunk} · score ${cit.score}`;
+          a.title = cit.text;
+          a.onclick = () => alert(cit.text);
+          c.appendChild(a);
+        }
+        m.appendChild(c);
+      }
+    } else {
+      m.classList.add('refused');
+      m.textContent = `🚫 ${data.reason}`;
+    }
+  } catch (e) {
+    m.classList.add('refused');
+    m.textContent = 'error: ' + e.message;
+  } finally {
+    send.disabled = false;
+    chat.scrollTop = chat.scrollHeight;
+    q.focus();
+  }
+}
+send.onclick = ask;
+q.onkeydown = e => { if (e.key === 'Enter') ask(); };
+</script>
+</body>
+</html>
