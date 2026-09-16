@@ -6,7 +6,7 @@
 #  - torch 2.6.0: matches the cu121 wheel index used in the Dockerfile
 docling==2.128.0
 FlagEmbedding==1.3.5
-qdrant-client==1.19.1
+qdrant-client==1.15.1
 fastapi==0.141.1
 uvicorn[standard]==0.53.0
 python-multipart==0.0.32
