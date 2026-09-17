@@ -12,12 +12,57 @@ locally except the final LLM call, which uses a cloud provider API.
 - **Qwen3-Reranker-0.6B** (Apache-2.0) — second-stage reranking of retrieved candidates
 - **Cloud LLM via API** — grounded answer generation, instructed to answer only from context and refuse otherwise (no internet knowledge)
 
+## Architecture
+
+Two Docker services; the model stages run in-process inside the `rag` service
+(on a single 8 GB GPU they share VRAM, so one process controls when each model
+holds memory):
+
 ```
-PDF/DOCX/... --Docling--> markdown --chunk--> BGE-M3 --> Qdrant (dense+sparse)
-query --> Qdrant RRF hybrid --> top-50 --> Qwen3 rerank --> top-k --> cloud LLM --> cited answer
+                        ┌───────────────────────────── rag service (FastAPI, 1 GPU process) ─────────────────────────────┐
+                        │                                                                                                  │
+ PDF/DOCX/… ──upload──► │  Docling ──► chunker ──► BGE-M3 ──┐                                                            │
+                        │  (parse,    (page-     (embed:    │                                                            │
+                        │   GPU OCR   provenant  dense +    │ upsert                                                      │
+                        │   + layout) chunks)    sparse)    ▼                                                            │
+                        │                            ┌──────────────┐                                                    │
+                        │  originals kept ─────────► │   Qdrant     │◄──────────────────────────────┐                   │
+                        │  (/data/files, for         │  (separate   │  hybrid search: dense + sparse │                   │
+                        │   file.pdf#page=N links)   │  service)    │  legs fused via RRF           │                   │
+                        │                            └──────┬───────┘                                │                   │
+                        │                                   │ top-50 candidates                     │                   │
+                        │                                   ▼                                       │                   │
+                        │                            Qwen3-Reranker ── all scores < 0.3? ──► refuse (no LLM call)      │
+                        │                                   │ top-k relevant chunks                 │                   │
+                        │                                   ▼                                       │                   │
+                        │                            cloud LLM API (OpenAI / OpenRouter / z.ai / any compatible)       │
+                        │                                   │                                                          │
+ chat UI (built-in) ◄───┤                                   ▼                                                          │
+ citations link to ─────┼────────── file.pdf#page=N ◄──── answer with [doc, chunk, page] citations                        │
+ the original PDF page  │                                                                                                  │
+                        └──────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-VRAM budget on 8 GB: BGE-M3 ≈ 1.1 GB + reranker ≈ 1.3 GB + Docling batches ≈ 3–4 GB.
+What each component does:
+
+- **Docling** — layout-aware document parsing (GPU): OCR, reading order, tables.
+  Produces text items that each know their source **page**.
+- **Chunker** — groups paragraphs into ~800-char chunks, carrying their page
+  numbers through.
+- **BGE-M3** — embedding model; one pass yields a dense vector (1024d, meaning)
+  and a sparse/lexical vector (exact terms) — the basis of hybrid search.
+- **Qdrant** — vector database (the second Docker service). Stores both vector
+  types per chunk and fuses dense+sparse search results server-side (RRF).
+- **Qwen3-Reranker** — second-stage scorer over the fused top-50; keeps only
+  chunks genuinely relevant to the question. Doubles as the **refusal gate**:
+  if nothing scores ≥ 0.3, the LLM is never called.
+- **Cloud LLM API** — the only internet dependency. Writes the final answer
+  strictly from the surviving chunks, citing `[doc, chunk, page]`.
+- **Web UI** — served by the same service: ingest via drag&drop, document list,
+  chat; citations deep-link into the retained original PDF (`file.pdf#page=N`).
+
+VRAM budget on 8 GB: BGE-M3 ≈ 1.1 GB + reranker ≈ 1.3 GB + Docling batches ≈ 3–4 GB
+(released after parsing so query-time models have room).
 
 ## Quickstart
 
