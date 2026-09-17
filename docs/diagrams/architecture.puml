@@ -1,0 +1,56 @@
+@startuml architecture
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName "DejaVu Sans"
+skinparam defaultFontSize 13
+skinparam roundCorner 10
+skinparam ArrowColor #475569
+skinparam ArrowThickness 1.5
+skinparam node {
+  BackgroundColor #F8FAFC
+  BorderColor #64748B
+}
+skinparam rectangle {
+  BackgroundColor<<rag>> #EEF2FF
+  BorderColor<<rag>> #6366F1
+  BackgroundColor<<stage>> #ECFDF5
+  BorderColor<<stage>> #10B981
+  BackgroundColor<<store>> #FFF7ED
+  BorderColor<<store>> #F59E0B
+  BackgroundColor<<ext>> #FDF2F8
+  BorderColor<<ext>> #EC4899
+  BackgroundColor<<ui>> #F0FDFA
+  BorderColor<<ui>> #14B8A6
+}
+title docling-rag-poc — local document RAG (one GPU box, cloud LLM API)
+
+actor User as user
+
+rectangle "rag service\n(FastAPI · one GPU process\ncompose service: rag)" <<rag>> {
+  rectangle "Docling\nlayout-aware parse\n(GPU: RapidOCR + layout)" <<stage>> as docling
+  rectangle "Chunker\n~800 chars, keeps\npage numbers" <<stage>> as chunker
+  rectangle "BGE-M3 embedder\none pass → dense (1024d)\n+ sparse (lexical)" <<stage>> as embed
+  rectangle "Qwen3-Reranker 0.6B\nscores top-50 candidates\nrefusal gate: all < 0.3 → refuse" <<stage>> as rerank
+  database "files volume\noriginal PDFs kept for\nfile.pdf#page=N links" <<store>> as files
+}
+
+database "Qdrant 1.15\n(compose service: qdrant)\ndense + sparse vectors\nserver-side RRF fusion" <<store>> as qdrant
+
+cloud "Cloud LLM API\nOpenAI / OpenRouter / z.ai /\nany OpenAI-compatible\n(only internet dependency)" <<ext>> as llm
+
+rectangle "Web UI\n(served by rag service)\ningest · doc list · chat" <<ui>> as ui
+
+user --> ui : asks / uploads
+ui --> docling : POST /documents (file)
+docling --> files : keep original
+docling --> chunker : page-provenant items
+chunker --> embed : chunks + pages
+embed --> qdrant : upsert dense+sparse
+
+ui --> qdrant : POST /query (question)
+qdrant --> rerank : fused top-50 (RRF)
+rerank --> llm : top-k chunks (if any pass ≥ 0.3)
+rerank --> ui : 🚫 refuse (nothing relevant)
+llm --> ui : grounded answer\n[doc, chunk, page] citations
+ui --> user : answer; citation click\nopens file.pdf#page=N
+@enduml
