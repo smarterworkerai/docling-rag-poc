@@ -18,18 +18,70 @@ Two Docker services; the model stages run in-process inside the `rag` service
 (on a single 8 GB GPU they share VRAM, so one process controls when each model
 holds memory):
 
-[![Architecture diagram](docs/diagrams/architecture.svg?v=2)](https://raw.githubusercontent.com/smarterworkerai/docling-rag-poc/main/docs/diagrams/architecture.png)
+```mermaid
+flowchart TB
+    subgraph RAG["rag service — FastAPI, one GPU process (Docker service 1)"]
+        direction LR
+        DL["Docling<br/>layout-aware parse<br/>GPU: RapidOCR + layout"] --> CK["Chunker<br/>~800 chars, keeps<br/>page numbers"]
+        CK --> EMB["BGE-M3 embedder<br/>dense 1024d + sparse<br/>in one pass"]
+        RR["Qwen3-Reranker 0.6B<br/>scores top-50 · refusal gate"]
+        FV[("files volume<br/>originals for<br/>file.pdf#page=N links")]
+    end
+
+    UI["Web UI<br/>ingest · doc list · chat<br/>(served by rag service)"]
+    QD[("Qdrant 1.15<br/>Docker service 2<br/>dense+sparse · RRF fusion")]
+    LLM[("Cloud LLM API<br/>OpenAI / OpenRouter / z.ai<br/>only internet dependency")]
+    USR((User))
+
+    USR -->|upload / ask| UI
+    UI -->|"POST /documents"| DL
+    DL -.->|keep original| FV
+    EMB -->|upsert| QD
+    UI -->|"POST /query"| QD
+    QD -->|fused top-50| RR
+    RR -->|"all < 0.3"| UI
+    RR -->|top-k ≥ 0.3| LLM
+    LLM -->|answer + citations| UI
+```
+
 
 ### Ingest flow (once per document)
 
-[![Ingest flow diagram](docs/diagrams/ingest-flow.svg?v=1)](https://raw.githubusercontent.com/smarterworkerai/docling-rag-poc/main/docs/diagrams/ingest-flow.png)
+```mermaid
+flowchart LR
+    USR((User)) -->|"① upload (drag & drop)"| UI["Web UI"]
+    UI -->|"① POST /documents"| DL["② Docling<br/>GPU parse: OCR,<br/>reading order, tables"]
+    DL -.->|"② keep original<br/>(for page links)"| FV[("files volume")]
+    DL -->|"③ page-provenant items"| CK["③ Chunker<br/>~800-char chunks<br/>with page numbers"]
+    CK -->|"④ chunks + pages"| EMB["④ BGE-M3<br/>dense 1024d + sparse"]
+    EMB -->|"⑤ embed → ⑥ upsert"| QD[("⑤⑥ Qdrant<br/>dense + sparse<br/>+ page payloads")]
+
+    QD -.- NOTE["after this the document is queryable;<br/>originals only needed for citation links"]
+    style NOTE fill:#FFF7ED,stroke:#F59E0B,stroke-dasharray: 3 3
+```
+
 
 ① upload → ② Docling parses on GPU (original kept for page links) → ③ chunk
 with page numbers → ④ BGE-M3 dense+sparse → ⑤⑥ upsert into Qdrant.
 
 ### Query flow (every question)
 
-[![Query flow diagram](docs/diagrams/query-flow.svg?v=1)](https://raw.githubusercontent.com/smarterworkerai/docling-rag-poc/main/docs/diagrams/query-flow.png)
+```mermaid
+flowchart LR
+    USR((User)) -->|"① ask"| UI["Web UI"]
+    UI -->|"① POST /query"| EMB["② BGE-M3 embeds<br/>the question"]
+    EMB -->|"② hybrid search"| QD[("② Qdrant<br/>dense leg + sparse leg<br/>fused via RRF → top-50")]
+    QD -->|"② top-50"| RR["③ Qwen3-Reranker<br/>scores each candidate"]
+    RR -->|"③④ nothing ≥ 0.3"| REF["🚫 refuse<br/>LLM never called"]
+    RR -->|"④ top-k pass"| LLM[("⑤ Cloud LLM<br/>grounded answer")]
+    LLM -->|"⑥ answer + [doc, chunk, page]"| UI
+    REF -->|"⑥ answered: false"| UI
+    UI -.->|"⑥ citation click"| FV[("files volume<br/>file.pdf#page=N")]
+
+    style REF fill:#FEE2E2,stroke:#DC2626
+    style RR fill:#ECFDF5,stroke:#10B981
+```
+
 
 ① ask → ② Qdrant hybrid search (dense + sparse, RRF-fused) → ③ Qwen3 reranks
 top-50 → ④ nothing ≥ 0.3? 🚫 refuse, LLM never called → ⑤ cloud LLM answers
@@ -57,12 +109,8 @@ What each component does:
 VRAM budget on 8 GB: BGE-M3 ≈ 1.1 GB + reranker ≈ 1.3 GB + Docling batches ≈ 3–4 GB
 (released after parsing so query-time models have room).
 
-Diagram source: `docs/diagrams/architecture.puml` (PlantUML); regenerate the
-`.svg`/`.png` after editing it:
-
-```bash
-docker run --rm -v "$PWD":/work -w /work plantuml/plantuml -tsvg -tpng docs/diagrams/architecture.puml
-```
+Diagrams are inline [Mermaid](https://mermaid.js.org) — GitHub renders them
+natively; edit the `mermaid` code blocks above directly.
 
 ## Quickstart
 
