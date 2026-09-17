@@ -1,0 +1,72 @@
+direction: right
+
+title {
+  label: "QUERY — every question (POST /query)\n"
+  near: top-center
+  shape: text
+  style.font-size: 24
+}
+
+user: { shape: person; label: User }
+ui: {
+  label: "Web UI\n(chat with citations)"
+  style.fill: "#F0FDFA"
+  style.stroke: "#14B8A6"
+}
+
+rag: {
+  label: "rag service — one GPU process"
+  style.fill: "#EEF2FF"
+  style.stroke: "#6366F1"
+
+  embed: {
+    label: "2. BGE-M3 embeds\nthe question:\ndense + sparse vector"
+    style.fill: "#ECFDF5"
+    style.stroke: "#10B981"
+  }
+  rerank: {
+    label: "3. Qwen3-Reranker 0.6B\nscores each candidate\nkeep only ≥ 0.3"
+    style.fill: "#ECFDF5"
+    style.stroke: "#10B981"
+    style.bold: true
+  }
+}
+
+qdrant: {
+  label: "2. Qdrant\nhybrid search: dense leg +\nsparse leg, RRF-fused\n→ top-50 candidates"
+  shape: cylinder
+  style.fill: "#FFF7ED"
+  style.stroke: "#F59E0B"
+}
+
+llm: {
+  label: "5. Cloud LLM API\nOpenAI / OpenRouter / z.ai /\nany OpenAI-compatible\n(only internet dependency)"
+  shape: cloud
+  style.fill: "#FDF2F8"
+  style.stroke: "#EC4899"
+}
+
+files: {
+  label: "files volume\nfile.pdf#page=N"
+  shape: cylinder
+  style.fill: "#FFF7ED"
+  style.stroke: "#F59E0B"
+}
+
+refuse: {
+  label: "4a. 🚫 REFUSE\nnothing ≥ 0.3 —\nLLM never called"
+  style.fill: "#FEE2E2"
+  style.stroke: "#DC2626"
+  style.bold: true
+}
+
+user -> ui: "1. ask" { style.bold: true }
+ui -> rag.embed: "1. POST /query" { style.bold: true }
+rag.embed -> qdrant: "2. hybrid search"
+qdrant -> rag.rerank: "2. top-50 (RRF-fused)"
+rag.rerank -> llm: "4b. top-k chunks pass\n(≥ 0.3)"
+rag.rerank -> refuse: "4a. all below 0.3" { style.stroke: "#DC2626" }
+llm -> ui: "5-6. grounded answer\n+ [doc, chunk, page] citations"
+refuse -> ui: "6. answered: false" { style.stroke: "#DC2626" }
+ui -> files: "6. citation click opens\nfile.pdf#page=N" { style.stroke-dash: 3 }
+ui -> user: "6. answer with\nclickable citations" { style.bold: true }

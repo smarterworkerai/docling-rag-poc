@@ -47,46 +47,25 @@ flowchart TB
 
 ### Ingest flow (once per document)
 
-```mermaid
-flowchart LR
-    USR((User)) -->|"① upload (drag & drop)"| UI["Web UI"]
-    UI -->|"① POST /documents"| DL["② Docling<br/>GPU parse: OCR,<br/>reading order, tables"]
-    DL -.->|"② keep original<br/>(for page links)"| FV[("files volume")]
-    DL -->|"③ page-provenant items"| CK["③ Chunker<br/>~800-char chunks<br/>with page numbers"]
-    CK -->|"④ chunks + pages"| EMB["④ BGE-M3<br/>dense 1024d + sparse"]
-    EMB -->|"⑤ embed → ⑥ upsert"| QD[("⑤⑥ Qdrant<br/>dense + sparse<br/>+ page payloads")]
-
-    QD -.- NOTE["after this the document is queryable;<br/>originals only needed for citation links"]
-    style NOTE fill:#FFF7ED,stroke:#F59E0B,stroke-dasharray: 3 3
-```
+[![Ingest flow](docs/diagrams/ingest-flow.svg)](docs/diagrams/ingest-flow.png)
 
 
-① upload → ② Docling parses on GPU (original kept for page links) → ③ chunk
-with page numbers → ④ BGE-M3 dense+sparse → ⑤⑥ upsert into Qdrant.
+
+**1** upload → **2** Docling parses on GPU (original kept for page links) →
+**3** chunk with page numbers → **4** BGE-M3 dense+sparse → **5** embed →
+**6** upsert into Qdrant.
 
 ### Query flow (every question)
 
-```mermaid
-flowchart LR
-    USR((User)) -->|"① ask"| UI["Web UI"]
-    UI -->|"① POST /query"| EMB["② BGE-M3 embeds<br/>the question"]
-    EMB -->|"② hybrid search"| QD[("② Qdrant<br/>dense leg + sparse leg<br/>fused via RRF → top-50")]
-    QD -->|"② top-50"| RR["③ Qwen3-Reranker<br/>scores each candidate"]
-    RR -->|"③④ nothing ≥ 0.3"| REF["🚫 refuse<br/>LLM never called"]
-    RR -->|"④ top-k pass"| LLM[("⑤ Cloud LLM<br/>grounded answer")]
-    LLM -->|"⑥ answer + [doc, chunk, page]"| UI
-    REF -->|"⑥ answered: false"| UI
-    UI -.->|"⑥ citation click"| FV[("files volume<br/>file.pdf#page=N")]
-
-    style REF fill:#FEE2E2,stroke:#DC2626
-    style RR fill:#ECFDF5,stroke:#10B981
-```
+[![Query flow](docs/diagrams/query-flow.svg)](docs/diagrams/query-flow.png)
 
 
-① ask → ② Qdrant hybrid search (dense + sparse, RRF-fused) → ③ Qwen3 reranks
-top-50 → ④ nothing ≥ 0.3? 🚫 refuse, LLM never called → ⑤ cloud LLM answers
-from the surviving chunks → ⑥ answer with `[doc, chunk, page]` citations;
-clicking one opens `file.pdf#page=N`.
+
+**1** ask → **2** Qdrant hybrid search (dense + sparse, RRF-fused → top-50) →
+**3** Qwen3 reranks every candidate → **4a** nothing ≥ 0.3 → 🚫 refuse, LLM
+never called, or **4b** top-k pass → **5** cloud LLM answers from the surviving
+chunks → **6** answer with `[doc, chunk, page]` citations; clicking one opens
+`file.pdf#page=N`.
 
 What each component does:
 
@@ -109,8 +88,15 @@ What each component does:
 VRAM budget on 8 GB: BGE-M3 ≈ 1.1 GB + reranker ≈ 1.3 GB + Docling batches ≈ 3–4 GB
 (released after parsing so query-time models have room).
 
-Diagrams are inline [Mermaid](https://mermaid.js.org) — GitHub renders them
-natively; edit the `mermaid` code blocks above directly.
+The architecture overview is inline [Mermaid](https://mermaid.js.org)
+(GitHub renders it natively — edit the code block directly). The two flow
+diagrams are [D2](https://d2lang.com): sources at `docs/diagrams/*.d2`,
+regenerate after editing:
+
+```bash
+d2 docs/diagrams/ingest-flow.d2 docs/diagrams/ingest-flow.svg && d2 docs/diagrams/ingest-flow.d2 docs/diagrams/ingest-flow.png
+d2 docs/diagrams/query-flow.d2 docs/diagrams/query-flow.svg && d2 docs/diagrams/query-flow.d2 docs/diagrams/query-flow.png
+```
 
 ## Quickstart
 

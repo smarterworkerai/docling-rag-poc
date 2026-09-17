@@ -1,0 +1,67 @@
+direction: right
+
+title {
+  label: "INGEST — once per document (POST /documents)\n"
+  near: top-center
+  shape: text
+  style.font-size: 24
+}
+
+user: { shape: person; label: User }
+ui: {
+  label: "Web UI\n(ingest · doc list · chat)"
+  style.fill: "#F0FDFA"
+  style.stroke: "#14B8A6"
+}
+
+rag: {
+  label: "rag service — one GPU process"
+  style.fill: "#EEF2FF"
+  style.stroke: "#6366F1"
+
+  docling: {
+    label: "2. Docling\nlayout-aware parse\nGPU: RapidOCR + layout\nOCR · reading order · tables"
+    style.fill: "#ECFDF5"
+    style.stroke: "#10B981"
+  }
+  files: {
+    label: "files volume\noriginals kept for\nfile.pdf#page=N links"
+    shape: cylinder
+    style.fill: "#FFF7ED"
+    style.stroke: "#F59E0B"
+  }
+  chunker: {
+    label: "3. Chunker\n~800-char chunks\ncarrying page numbers"
+    style.fill: "#ECFDF5"
+    style.stroke: "#10B981"
+  }
+  embed: {
+    label: "4. BGE-M3 embedder\none pass per chunk:\ndense 1024d + sparse"
+    style.fill: "#ECFDF5"
+    style.stroke: "#10B981"
+  }
+}
+
+qdrant: {
+  label: "5-6. Qdrant\ndense + sparse vectors\n+ page payloads"
+  shape: cylinder
+  style.fill: "#FFF7ED"
+  style.stroke: "#F59E0B"
+}
+
+note: {
+  label: "After this the document is queryable.\nOriginals are only needed for citation page links."
+  shape: text
+  style.font-size: 13
+  style.stroke: "#F59E0B"
+  style.fill: "#FFF7ED"
+}
+
+user -> ui: "1. upload (drag & drop)" { style.bold: true }
+ui -> rag.docling: "1. POST /documents" { style.bold: true }
+rag.docling -> rag.files: "2. keep original" { style.stroke-dash: 3 }
+rag.docling -> rag.chunker: "3. page-provenant items"
+rag.chunker -> rag.embed: "4. chunks + pages"
+rag.embed -> qdrant: "5. embed → 6. upsert\n(dense + sparse)"
+
+qdrant -> note: { style.stroke-dash: 3; style.animated: false }
