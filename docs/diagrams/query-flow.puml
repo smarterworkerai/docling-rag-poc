@@ -1,0 +1,59 @@
+@startuml query-flow
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName "DejaVu Sans"
+skinparam defaultFontSize 13
+skinparam roundCorner 10
+skinparam ArrowColor #475569
+skinparam ArrowThickness 1.5
+skinparam node {
+  BackgroundColor #F8FAFC
+  BorderColor #64748B
+}
+skinparam rectangle {
+  BackgroundColor<<rag>> #EEF2FF
+  BorderColor<<rag>> #6366F1
+  BackgroundColor<<stage>> #ECFDF5
+  BorderColor<<stage>> #10B981
+  BackgroundColor<<store>> #FFF7ED
+  BorderColor<<store>> #F59E0B
+  BackgroundColor<<ext>> #FDF2F8
+  BorderColor<<ext>> #EC4899
+  BackgroundColor<<ui>> #F0FDFA
+  BorderColor<<ui>> #14B8A6
+}
+skinparam ArrowColor<<refuse>> #DC2626
+title QUERY flow — every question (POST /query)
+
+actor User as user
+rectangle "Web UI\n(served by rag service)" <<ui>> as ui
+
+rectangle "rag service\n(one GPU process)" <<rag>> {
+  rectangle "② BGE-M3 embedder\nembeds the question:\ndense + sparse vector" <<stage>> as embed
+  rectangle "③ Qwen3-Reranker 0.6B\nscores each candidate\nkeep only ≥ 0.3" <<stage>> as rerank
+}
+
+database "② Qdrant\nhybrid search: dense leg +\nsparse leg, fused via RRF\n→ top-50 candidates" <<store>> as qdrant
+
+cloud "⑤ Cloud LLM API\nOpenAI / OpenRouter / z.ai /\nany OpenAI-compatible\n(only internet dependency)" <<ext>> as llm
+
+database "files volume\noriginals for\nfile.pdf#page=N links" <<store>> as files
+
+user --> ui : ① ask question
+ui --> embed : ① POST /query
+embed --> qdrant : ② search with\nquestion vectors
+qdrant --> rerank : ② top-50 (RRF-fused)
+
+rerank --> llm : ④ top-k chunks pass →\n⑤ generate grounded answer
+rerank -[#DC2626]-> ui : ③④ nothing ≥ 0.3 →\n<b>🚫 refuse — LLM never called</b>
+llm --> ui : ⑥ answer + [doc, chunk, page]\ncitations
+ui --> files : ⑥ citation click opens\nfile.pdf#page=N
+ui --> user : ⑥ answer with\nclickable citations
+
+note bottom of rerank
+  <b>Refusal gate:</b> the reranker is the last
+  local stage. If no chunk is genuinely
+  relevant, the LLM is never invoked —
+  no hallucination path exists.
+end note
+@enduml

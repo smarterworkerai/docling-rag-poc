@@ -20,6 +20,22 @@ holds memory):
 
 [![Architecture diagram](docs/diagrams/architecture.svg?v=2)](https://raw.githubusercontent.com/smarterworkerai/docling-rag-poc/main/docs/diagrams/architecture.png)
 
+### Ingest flow (once per document)
+
+[![Ingest flow diagram](docs/diagrams/ingest-flow.svg?v=1)](https://raw.githubusercontent.com/smarterworkerai/docling-rag-poc/main/docs/diagrams/ingest-flow.png)
+
+① upload → ② Docling parses on GPU (original kept for page links) → ③ chunk
+with page numbers → ④ BGE-M3 dense+sparse → ⑤⑥ upsert into Qdrant.
+
+### Query flow (every question)
+
+[![Query flow diagram](docs/diagrams/query-flow.svg?v=1)](https://raw.githubusercontent.com/smarterworkerai/docling-rag-poc/main/docs/diagrams/query-flow.png)
+
+① ask → ② Qdrant hybrid search (dense + sparse, RRF-fused) → ③ Qwen3 reranks
+top-50 → ④ nothing ≥ 0.3? 🚫 refuse, LLM never called → ⑤ cloud LLM answers
+from the surviving chunks → ⑥ answer with `[doc, chunk, page]` citations;
+clicking one opens `file.pdf#page=N`.
+
 What each component does:
 
 - **Docling** — layout-aware document parsing (GPU): OCR, reading order, tables.
