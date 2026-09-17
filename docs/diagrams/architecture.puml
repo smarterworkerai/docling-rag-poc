@@ -24,6 +24,15 @@ skinparam rectangle {
 }
 title docling-rag-poc — local document RAG (one GPU box, cloud LLM API)
 
+legend top left
+<&check> |= <b>INGEST</b> (once per document, via ① upload) |= <b>QUERY</b> (every question, via ① ask) |
+| <b>②</b> Docling parses (GPU)      | <b>②</b> Qdrant hybrid search: dense + sparse, RRF-fused |
+| <b>③</b> original kept in files    | <b>③</b> Qwen3 reranks top-50 → keep ≥ 0.3 |
+| <b>④</b> chunk with page numbers   | <b>④</b> all below 0.3? → 🚫 refuse, LLM never called |
+| <b>⑤</b> BGE-M3: dense + sparse   | <b>⑤</b> cloud LLM answers from surviving chunks |
+| <b>⑥</b> upsert into Qdrant        | <b>⑥</b> answer + [doc, chunk, page] citations → UI |
+endlegend
+
 actor User as user
 
 rectangle "rag service\n(FastAPI · one GPU process\ncompose service: rag)" <<rag>> {
@@ -40,17 +49,17 @@ cloud "Cloud LLM API\nOpenAI / OpenRouter / z.ai /\nany OpenAI-compatible\n(only
 
 rectangle "Web UI\n(served by rag service)\ningest · doc list · chat" <<ui>> as ui
 
-user --> ui : asks / uploads
-ui --> docling : POST /documents (file)
-docling --> files : keep original
-docling --> chunker : page-provenant items
-chunker --> embed : chunks + pages
-embed --> qdrant : upsert dense+sparse
+user --> ui : <b>INGEST ①</b> upload file\n<b>QUERY ①</b> ask question
+ui --> docling : <b>INGEST ①</b> POST /documents
+docling --> files : <b>INGEST ②</b> keep original
+docling --> chunker : <b>INGEST ③</b> page-provenant items
+chunker --> embed : <b>INGEST ④</b> chunks + pages
+embed --> qdrant : <b>INGEST ⑤⑥</b> embed → upsert\n(dense + sparse)
 
-ui --> qdrant : POST /query (question)
-qdrant --> rerank : fused top-50 (RRF)
-rerank --> llm : top-k chunks (if any pass ≥ 0.3)
-rerank --> ui : 🚫 refuse (nothing relevant)
-llm --> ui : grounded answer\n[doc, chunk, page] citations
-ui --> user : answer; citation click\nopens file.pdf#page=N
+ui --> qdrant : <b>QUERY ①</b> POST /query
+qdrant --> rerank : <b>QUERY ②</b> fused top-50 (RRF)
+rerank --> llm : <b>QUERY ③④</b> top-k (≥ 0.3)
+rerank --> ui : <b>QUERY ③</b> 🚫 refuse (nothing relevant)
+llm --> ui : <b>QUERY ⑤</b> grounded answer\n<b>QUERY ⑥</b> [doc, chunk, page] citations
+ui --> user : <b>QUERY ⑥</b> answer; citation click\nopens file.pdf#page=N
 @enduml
