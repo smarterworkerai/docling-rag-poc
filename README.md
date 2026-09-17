@@ -18,7 +18,7 @@ Two Docker services; the model stages run in-process inside the `rag` service
 (on a single 8 GB GPU they share VRAM, so one process controls when each model
 holds memory):
 
-[![Architecture diagram](docs/diagrams/architecture.svg)](https://raw.githubusercontent.com/smarterworkerai/docling-rag-poc/main/docs/diagrams/architecture.png)
+[![Architecture diagram](docs/diagrams/architecture.svg?v=2)](https://raw.githubusercontent.com/smarterworkerai/docling-rag-poc/main/docs/diagrams/architecture.png)
 
 What each component does:
 
