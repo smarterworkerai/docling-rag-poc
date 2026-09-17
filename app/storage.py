@@ -34,11 +34,19 @@ def ensure_collection() -> None:
         log.info("created collection %s", settings.qdrant_collection)
 
 
-def upsert_chunks(chunks: list[str], dense: list, sparse: list, doc: str, pages: list[list[int]] | None = None) -> None:
+def upsert_chunks(
+    chunks: list[str],
+    dense: list,
+    sparse: list,
+    doc: str,
+    pages: list[list[int]] | None = None,
+    metadata: dict | None = None,
+) -> None:
     c = _client()
     points = []
+    base_payload = metadata or {}
     for i in range(len(chunks)):
-        payload = {"text": chunks[i], "doc": doc, "chunk_id": i}
+        payload = {**base_payload, "text": chunks[i], "doc": doc, "chunk_id": i}
         if pages and pages[i]:
             payload["page"] = pages[i][0]
             payload["pages"] = pages[i]
@@ -86,6 +94,16 @@ def rrf_search(query: str, top_k: int) -> list[dict]:
             {
                 "chunk_id": payload.get("chunk_id"),
                 "doc": payload.get("doc"),
+                "document_id": payload.get("document_id"),
+                "title": payload.get("title"),
+                "publisher": payload.get("publisher"),
+                "source_url": payload.get("source_url") or payload.get("final_url") or payload.get("original_url"),
+                "language": payload.get("language"),
+                "country_region": payload.get("country_region"),
+                "document_type": payload.get("document_type"),
+                "topics": payload.get("topics"),
+                "flooring_types": payload.get("flooring_types"),
+                "authority_score": payload.get("authority_score"),
                 "page": payload.get("page"),
                 "pages": payload.get("pages") or [],
                 "text": payload.get("text", ""),
@@ -108,18 +126,36 @@ def list_documents() -> list[dict]:
         )
     except Exception:  # noqa: BLE001  (already exists)
         pass
-    docs: dict[str, int] = {}
-    points, _next = c.scroll(
-        collection_name=settings.qdrant_collection,
-        with_payload=["doc"],
-        with_vectors=False,
-        limit=256,
-    )
-    for point in points or []:
-        doc = (point.payload or {}).get("doc")
-        if doc:
-            docs[doc] = docs.get(doc, 0) + 1
-    return [{"doc": d, "chunks": n} for d, n in sorted(docs.items())]
+    docs: dict[str, dict] = {}
+    offset = None
+    while True:
+        points, offset = c.scroll(
+            collection_name=settings.qdrant_collection,
+            with_payload=["doc", "document_id", "title", "publisher", "language"],
+            with_vectors=False,
+            limit=512,
+            offset=offset,
+        )
+        for point in points or []:
+            payload = point.payload or {}
+            doc = payload.get("doc")
+            if not doc:
+                continue
+            entry = docs.setdefault(
+                doc,
+                {
+                    "doc": doc,
+                    "chunks": 0,
+                    "document_id": payload.get("document_id"),
+                    "title": payload.get("title"),
+                    "publisher": payload.get("publisher"),
+                    "language": payload.get("language"),
+                },
+            )
+            entry["chunks"] += 1
+        if offset is None:
+            break
+    return [docs[d] for d in sorted(docs)]
 
 
 def delete_document(doc: str) -> int:

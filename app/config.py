@@ -26,6 +26,7 @@ class Settings:
     # --- Retrieval ---
     retrieval_limit: int = field(default_factory=lambda: _int("RETRIEVAL_LIMIT", 50))  # candidates per leg
     rrf_k: int = field(default_factory=lambda: _int("RRF_K", 60))
+    rerank_batch_size: int = field(default_factory=lambda: _int("RERANK_BATCH_SIZE", 2))
 
     # --- Docling (A4000 Mobile tuned: big GPU batches) ---
     docling_layout_batch_size: int = field(default_factory=lambda: _int("DOCLING_LAYOUT_BATCH_SIZE", 32))

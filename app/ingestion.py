@@ -192,7 +192,22 @@ def _mk_chunk(current: list[tuple[str, int | None]]) -> dict:
     }
 
 
-def ingest_document(path: str, filename: str) -> dict:
+def ingest_document(path: str, filename: str, metadata: dict | None = None) -> dict:
+    # Docling layout/OCR/table models and BGE-M3/reranker compete for the same
+    # 8 GB GPU. Release cached retrieval models before parsing each document;
+    # they are reloaded after Docling has released its pipeline.
+    try:
+        from retrieval import get_embedder, get_reranker
+
+        get_embedder.cache_clear()
+        get_reranker.cache_clear()
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:  # noqa: BLE001
+        pass
+
     units = parse_document(path)
     if units is None:
         md = result_markdown_fallback(path)
@@ -210,7 +225,14 @@ def ingest_document(path: str, filename: str) -> dict:
 
     from storage import upsert_chunks
 
-    upsert_chunks([c["text"] for c in chunks], dense, sparse, doc=filename, pages=[c["pages"] for c in chunks])
+    upsert_chunks(
+        [c["text"] for c in chunks],
+        dense,
+        sparse,
+        doc=filename,
+        pages=[c["pages"] for c in chunks],
+        metadata=metadata,
+    )
     return {"chunks": len(chunks), "chars": sum(len(c["text"]) for c in chunks), "doc": filename}
 
 

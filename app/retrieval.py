@@ -19,10 +19,12 @@ SYSTEM_PROMPT = (
 @lru_cache(maxsize=1)
 def get_embedder():
     from FlagEmbedding import BGEM3FlagModel
+    import torch
 
     log.info("loading embedder %s (hf cache %s)", settings.embed_model, settings.hf_cache)
     # fp16 on GPU; on CPU-only hosts fp32 is used (fp16 gives no speedup there)
-    use_fp16 = settings.device.startswith("cuda")
+    device = settings.device if settings.device != "auto" else ("cuda" if torch.cuda.is_available() else "cpu")
+    use_fp16 = device.startswith("cuda")
     return BGEM3FlagModel(settings.embed_model, use_fp16=use_fp16)
 
 
@@ -79,7 +81,7 @@ def _rerank(query: str, texts: list[str]) -> list[float]:
         # batch: a [B, 2048] fp16 forward of a 0.6B causal LM costs ~GBs of
         # activation memory; keep B small (VRAM is shared with the embedder
         # and the docling layout model)
-        batch = 8
+        batch = max(1, settings.rerank_batch_size)
         for i in range(0, len(texts), batch):
             part = [
                 f"{prefix}Query: {query}\nDocument: {t}{suffix}" for t in texts[i:i + batch]

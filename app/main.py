@@ -4,10 +4,11 @@ import os
 import shutil
 import tempfile
 import logging
+import json
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -67,18 +68,36 @@ def health() -> dict:
 
 
 @app.post("/documents")
-async def upload_document(file: UploadFile = File(...)) -> dict:
+async def upload_document(file: UploadFile = File(...), metadata: str | None = Form(None)) -> dict:
     """Ingest a PDF/DOCX/... file: Docling parse -> chunk -> BGE-M3 embed -> Qdrant."""
     suffix = os.path.splitext(file.filename or "")[1].lower()
     supported = {".pdf", ".docx", ".doc", ".pptx", ".xlsx", ".html", ".md", ".txt", ".csv"}
     if suffix and suffix not in supported:
         raise HTTPException(400, f"unsupported file type '{suffix}', supported: {sorted(supported)}")
 
+    parsed_metadata = None
+    if metadata:
+        try:
+            parsed_metadata = json.loads(metadata)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(400, f"metadata must be valid JSON: {exc}") from exc
+        if not isinstance(parsed_metadata, dict):
+            raise HTTPException(400, "metadata must be a JSON object")
+        parsed_metadata = {
+            str(k): v
+            for k, v in parsed_metadata.items()
+            if isinstance(v, (str, int, float, bool, list, dict)) or v is None
+        }
+
     with tempfile.NamedTemporaryFile(suffix=suffix or None, delete=False) as tmp:
         tmp.write(await file.read())
         tmp_path = tmp.name
     try:
-        stats = ingest_document(tmp_path, filename=file.filename or os.path.basename(tmp_path))
+        stats = ingest_document(
+            tmp_path,
+            filename=file.filename or os.path.basename(tmp_path),
+            metadata=parsed_metadata,
+        )
         # keep the original for citation deep-links (file.pdf#page=N)
         try:
             files_dir = Path("/data/files")
@@ -111,6 +130,10 @@ def query(req: QueryRequest) -> AnswerResponse:
         citations=[
             {
                 "doc": h["doc"],
+                "document_id": h.get("document_id"),
+                "title": h.get("title"),
+                "publisher": h.get("publisher"),
+                "source_url": h.get("source_url"),
                 "page": h.get("page"),
                 "pages": h.get("pages") or ([h["page"]] if h.get("page") else []),
                 "chunk": h["chunk_id"],
